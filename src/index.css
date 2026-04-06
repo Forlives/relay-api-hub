@@ -7,43 +7,56 @@
     --color-brand: #3b82f6;
   }
   body {
-    @apply antialiased;
+    @apply antialiased bg-[#030712] text-gray-100 overflow-x-hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   }
   ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
   }
   ::-webkit-scrollbar-track {
-    @apply bg-gray-900;
+    @apply bg-transparent;
   }
   ::-webkit-scrollbar-thumb {
-    @apply bg-gray-700 rounded-full;
+    @apply bg-white/10 rounded-full;
   }
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-gray-600;
+    @apply bg-white/20;
   }
 }
 
 @layer components {
-  .glass-card {
-    @apply bg-gray-900/60 backdrop-blur-xl border border-gray-800/50 rounded-2xl;
+  .glass-panel {
+    @apply bg-white/[0.02] backdrop-blur-2xl border border-white/[0.05] rounded-3xl shadow-2xl;
   }
-  .glow-brand {
-    box-shadow: 0 0 20px rgba(59, 130, 246, 0.15), 0 0 60px rgba(59, 130, 246, 0.05);
+  .glass-input {
+    @apply bg-white/[0.03] border border-white/[0.08] rounded-2xl px-4 py-3.5 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 focus:bg-white/[0.05] transition-all duration-300;
+  }
+  .btn-primary {
+    @apply relative overflow-hidden bg-white text-black font-semibold rounded-2xl px-6 py-3.5 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] shadow-[0_0_40px_-10px_rgba(255,255,255,0.3)];
+  }
+  .btn-primary::before {
+    content: '';
+    @apply absolute inset-0 bg-gradient-to-r from-transparent via-white/50 to-transparent -translate-x-full;
+    animation: shimmer 2s infinite;
   }
   .gradient-text {
-    @apply bg-gradient-to-r from-blue-400 via-cyan-400 to-emerald-400 bg-clip-text text-transparent;
+    @apply bg-gradient-to-br from-white via-white to-white/40 bg-clip-text text-transparent;
   }
-  .status-dot {
-    @apply w-2 h-2 rounded-full;
+  .gradient-text-brand {
+    @apply bg-gradient-to-br from-blue-400 via-indigo-400 to-purple-400 bg-clip-text text-transparent;
   }
-  .status-dot-online {
-    @apply bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.6)];
-  }
-  .status-dot-offline {
-    @apply bg-red-400 shadow-[0_0_6px_rgba(248,113,113,0.6)];
-  }
-  .status-dot-degraded {
-    @apply bg-yellow-400 shadow-[0_0_6px_rgba(250,204,21,0.6)];
-  }
+}
+
+@keyframes shimmer {
+  100% { transform: translateX(100%); }
+}
+
+/* Background grid pattern */
+.bg-grid {
+  background-size: 40px 40px;
+  background-image: linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  mask-image: linear-gradient(to bottom, black 40%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 40%, transparent 100%);
 }
