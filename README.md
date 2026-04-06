@@ -1,85 +1,71 @@
 # API 纯净度检测器
 
-> 你买的 AI API 掺水了吗？一键检测，用数据说话。
+> 你买的 API 掺水了吗？用 6 个维度对比官方基线，告诉你 API 到底纯不纯。
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Node](https://img.shields.io/badge/node-%3E%3D18-green.svg)
+<p align="center">
+  <img src="public/favicon.svg" width="64" alt="icon" />
+</p>
 
----
+## 工作原理
 
-## 这是什么？
+与传统的「问几道题」式检测不同，本工具采用 **协议级指纹分析**，将被测 API 与**真实官方 API 的已知行为基线**做 1:1 对比。
 
-买了 Claude / GPT / Gemini 的 API 中转服务，不确定商家有没有拿廉价模型冒充高端模型？
+### 6 大检测维度
 
-**粘贴你的 API 地址和 Key，点一下，10 秒出结果。**
+| 维度 | 满分 | 检测内容 | 为什么有效 |
+|------|------|---------|-----------|
+| **SSE 协议指纹** | 100 | 流式响应的 SSE 事件链结构 | 官方 Anthropic 有独特的 `message_start → content_block_start → content_block_delta → message_delta → message_stop` 完整事件链，掺水站很难完美伪造 |
+| **模型身份验证** | 100 | 返回头 model 字段 + 自我声明 | 官方 API 会在 HTTP 返回头中标识正确模型名，且模型能正确自我介绍身份 |
+| **知识截止验证** | 100 | 训练数据截止时间 | 每个模型版本有固定的知识截止日期（如 Claude 4.6 = 2025 年 5 月），替换模型会暴露不同日期 |
+| **推理能力基线** | 100 | 数学陷阱 + 逻辑推理 | 高端模型（Claude 4.6/GPT-5.4）的基础推理正确率 100%，低端替代模型做不到 |
+| **代码生成质量** | 100 | 类型标注/边界处理/算法优化 | 官方高端模型的代码质量有已知特征（类型标注、sqrt 优化等），廉价模型缺少这些 |
+| **响应一致性** | 100 | 多次请求的模型标识和延迟 | 正规 API 多次请求的 model 字段完全一致，延迟波动在合理范围内 |
 
-检测器会自动向你的 API 发送 5 个精心设计的探针请求，从多个维度验证你拿到的到底是不是正品：
+### 综合评定
 
-| 探针 | 检测什么 | 原理 |
-|------|----------|------|
-| 🪪 **身份验证** | 模型是否是你买的那个 | 让模型自报身份，对比请求模型和返回头中的模型标识 |
-| 🧮 **数学推理** | 模型智力水平 | 简单但需要理解力的数学题，廉价模型容易答错 |
-| 🧩 **逻辑推理** | 是否是高端模型 | 经典思维陷阱题，区分高端和低端模型 |
-| 💻 **代码质量** | 生成水平是否达标 | 让模型写代码，评估类型标注、边界处理、算法优化 |
-| 🌏 **中文理解** | 是否用国产模型替换 | 测试对中文俚语/网络用语的理解深度 |
-
-## 检测结果
-
-- ✅ **检测通过** — 各项探针均未发现掺水迹象
-- ⚠️ **轻微异常** — 有一项不太正常，可能是版本差异
-- 🟠 **存在可疑迹象** — 多项异常，建议谨慎
-- 🔴 **高度疑似掺水** — 检测到严重问题，大概率被偷换模型
+- **检测通过** — 各项维度均与官方基线匹配
+- **轻微异常** — 多个维度存在偏差（可能是版本差异）
+- **存在可疑** — 某维度严重异常
+- **高度疑似掺水** — 2 个以上维度严重不达标
 
 ## 快速使用
 
-### 环境要求
-
-- Node.js >= 18
-
-### 三步启动
-
 ```bash
-git clone https://github.com/Forlives/relay-api-hub.git
-cd relay-api-hub
+# 克隆并安装
+git clone https://github.com/percyyuan/pian_key.git
+cd pian_key
 npm install
-npm run dev:all
+
+# 启动（前后端同时）
+npm run dev
 ```
 
-打开 http://localhost:5173 ，粘贴你的 API 信息，点击"开始检测"。
-
-### 生产部署（单命令）
-
-```bash
-npm run build && npm run server
-```
-
-访问 http://localhost:3721
+打开 `http://localhost:5173`，输入你的 API 地址、Key 和购买的模型，点击「开始深度检测」。
 
 ## 隐私安全
 
-- **Key 不会被存储** — 仅在检测时实时使用，用完即丢
-- **不发送到第三方** — 所有请求直接从你的服务器发往中转站
-- **完全开源** — 代码就在这里，随时审查
-- **总消耗 < 500 token** — 5 个探针请求加起来花不了几分钱
+- API Key **不会被存储**，仅在检测过程中临时使用
+- 后端完全 **无状态**，不使用任何数据库
+- 所有检测请求都在你的 **本地服务器** 发出
 
 ## 技术栈
 
-- **前端**: React + TypeScript + Vite + Tailwind CSS + Framer Motion
-- **后端**: Node.js + Express（无数据库，纯无状态）
-- **检测**: 5 个并行探针 + 模型指纹比对 + 综合评分算法
+**前端**: React 18 + TypeScript + Tailwind CSS + Framer Motion
+**后端**: Node.js + Express（无状态）
+
+## 支持的模型家族
+
+| 家族 | 示例模型 | 检测维度 |
+|------|---------|---------|
+| Claude (Anthropic) | claude-sonnet-4-6, claude-opus-4-6 | 全部 6 维度（含 SSE 协议指纹） |
+| GPT (OpenAI) | gpt-5.4 | 5 维度（SSE 指纹不适用） |
+| Gemini (Google) | gemini-3.1-pro | 5 维度 |
+| DeepSeek | deepseek-r1 | 5 维度 |
 
 ## API
 
-只有两个接口，简单明了：
-
 ```
-POST /api/detect    — 完整检测（5 个探针）
-POST /api/ping      — 快速连通性测试
-```
-
-### /api/detect 请求体
-
-```json
+POST /api/detect
 {
   "api_base": "https://api.example.com/v1",
   "api_key": "sk-...",
@@ -87,23 +73,7 @@ POST /api/ping      — 快速连通性测试
 }
 ```
 
-### 返回结果
-
-```json
-{
-  "status": "pass | caution | suspect | fail",
-  "verdict": "检测通过",
-  "score": 95,
-  "avgLatency": 1200,
-  "issues": [],
-  "probes": { ... }
-}
-```
-
-## 灵感来源
-
-- [zzsting88/relayAPI](https://github.com/zzsting88/relayAPI) — AI API 中转站推荐与评测
-- [hvoy.ai](https://hvoy.ai/) — 中转站实时排行
+返回 6 维度的详细分数、官方基线对比和综合评定结果。
 
 ## License
 
