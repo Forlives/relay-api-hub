@@ -1,14 +1,9 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
-  darkMode: 'class',
   theme: {
     extend: {
       colors: {
-        background: '#030712',
-        surface: '#0f172a',
-        surfaceHover: '#1e293b',
-        border: 'rgba(255, 255, 255, 0.08)',
         brand: {
           400: '#60a5fa',
           500: '#3b82f6',
@@ -16,8 +11,8 @@ export default {
         },
       },
       animation: {
-        'blob': 'blob 7s infinite',
-        'scan': 'scan 2s linear infinite',
+        'blob': 'blob 10s infinite',
+        'scan': 'scan 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
         'pulse-slow': 'pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
         'float': 'float 6s ease-in-out infinite',
       },
