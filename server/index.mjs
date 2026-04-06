@@ -1,393 +1,466 @@
 import express from 'express'
 import cors from 'cors'
-import Database from 'better-sqlite3'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import fs from 'fs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const DATA_DIR = join(__dirname, '..', 'data')
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true })
-
-const db = new Database(join(DATA_DIR, 'relay.db'))
-db.pragma('journal_mode = WAL')
-
-// ─── Schema ───
-db.exec(`
-  CREATE TABLE IF NOT EXISTS sites (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    url TEXT DEFAULT '',
-    api_base TEXT NOT NULL,
-    description TEXT DEFAULT '',
-    category TEXT DEFAULT 'neutral',
-    models TEXT DEFAULT 'Claude,GPT,Gemini',
-    created_at TEXT DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS test_results (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    site_id INTEGER NOT NULL,
-    model TEXT NOT NULL,
-    latency_ms REAL DEFAULT 0,
-    success INTEGER DEFAULT 0,
-    status_code INTEGER DEFAULT 0,
-    tokens_per_second REAL DEFAULT 0,
-    is_watermarked INTEGER DEFAULT 0,
-    error_message TEXT,
-    tested_at TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS api_keys (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    key_value TEXT NOT NULL,
-    created_at TEXT DEFAULT (datetime('now'))
-  );
-`)
-
-// seed default sites if empty
-const siteCount = db.prepare('SELECT COUNT(*) as cnt FROM sites').get()
-if (siteCount.cnt === 0) {
-  const seedSites = [
-    { name: 'PackyCode', url: 'https://www.packyapi.com', api_base: 'https://api.packyapi.com/v1', category: 'recommended', models: 'Claude,GPT,Gemini', description: '老牌站点，质量稳定，客服响应快' },
-    { name: 'AI派', url: 'https://api.aipaibox.com', api_base: 'https://api.aipaibox.com/v1', category: 'recommended', models: 'Claude,Gemini,GPT', description: '价格便宜，质量不错，不注水' },
-    { name: '云雾AI', url: 'https://yunwu.ai', api_base: 'https://api.yunwu.ai/v1', category: 'recommended', models: 'Claude,GPT,Gemini,DeepSeek', description: '老牌中转站，支持模型多，面向企业' },
-    { name: 'RightCode', url: 'https://www.right.codes', api_base: 'https://api.right.codes/v1', category: 'recommended', models: 'Claude,Gemini,GPT', description: '编程专用，文档清晰，接口快' },
-    { name: 'Chintao AI', url: 'https://chintao.cn', api_base: 'https://api.chintao.cn/v1', category: 'recommended', models: 'Claude,GPT', description: '新站质量好，接口稳定不掺水' },
-    { name: 'SparkCode', url: 'https://sparkcode.top', api_base: 'https://api.sparkcode.top/v1', category: 'neutral', models: 'Claude,Gemini,GPT,Kimi,GLM', description: '支持多种编程模型' },
-    { name: 'BUZZ', url: 'https://buzzai.cc', api_base: 'https://api.buzzai.cc/v1', category: 'neutral', models: 'Claude,GPT', description: '价格清晰，稳定性不错' },
-    { name: 'ZeroCode', url: 'https://zerocode.sbs', api_base: 'https://api.zerocode.sbs/v1', category: 'neutral', models: 'Claude,Gemini,GPT', description: 'VIP分等级，新用户送额度' },
-  ]
-  const insert = db.prepare('INSERT INTO sites (name, url, api_base, category, models, description) VALUES (?, ?, ?, ?, ?, ?)')
-  for (const s of seedSites) {
-    insert.run(s.name, s.url, s.api_base, s.category, s.models, s.description)
-  }
-}
 
 const app = express()
 app.use(cors())
 app.use(express.json())
 
-// ─── Sites ───
-app.get('/api/sites', (_req, res) => {
-  const sites = db.prepare('SELECT * FROM sites ORDER BY category, name').all()
-  res.json(sites)
-})
+// ─── Model Fingerprint Database ───
+// Known behaviors for each model family to detect substitution
+const MODEL_FINGERPRINTS = {
+  'claude': {
+    keywords: ['claude', 'anthropic'],
+    canSolveHard: true,
+    typicalTPS: { min: 15, max: 120 },
+    knownSelfId: /claude|anthropic/i,
+  },
+  'gpt': {
+    keywords: ['gpt', 'openai', 'chatgpt'],
+    canSolveHard: true,
+    typicalTPS: { min: 20, max: 150 },
+    knownSelfId: /gpt|openai/i,
+  },
+  'gemini': {
+    keywords: ['gemini', 'google'],
+    canSolveHard: true,
+    typicalTPS: { min: 20, max: 200 },
+    knownSelfId: /gemini|google/i,
+  },
+}
 
-app.post('/api/sites', (req, res) => {
-  const { name, url, api_base, description, category, models } = req.body
-  if (!name || !api_base) return res.status(400).json({ error: '名称和API地址必填' })
-  const result = db.prepare(
-    'INSERT INTO sites (name, url, api_base, description, category, models) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(name, url || '', api_base, description || '', category || 'neutral', models || 'Claude,GPT,Gemini')
-  const site = db.prepare('SELECT * FROM sites WHERE id = ?').get(result.lastInsertRowid)
-  res.json(site)
-})
+function getModelFamily(model) {
+  const m = model.toLowerCase()
+  if (m.includes('claude') || m.includes('sonnet') || m.includes('opus') || m.includes('haiku')) return 'claude'
+  if (m.includes('gpt') || m.includes('o1') || m.includes('o3') || m.includes('o4')) return 'gpt'
+  if (m.includes('gemini')) return 'gemini'
+  if (m.includes('deepseek')) return 'deepseek'
+  if (m.includes('glm') || m.includes('chatglm')) return 'glm'
+  if (m.includes('qwen')) return 'qwen'
+  return 'unknown'
+}
 
-app.delete('/api/sites/:id', (req, res) => {
-  db.prepare('DELETE FROM sites WHERE id = ?').run(req.params.id)
-  res.json({ ok: true })
-})
+// ─── Detection Probes ───
 
-// ─── API Keys ───
-app.get('/api/keys', (_req, res) => {
-  const keys = db.prepare('SELECT id, name, key_value, created_at FROM api_keys ORDER BY created_at DESC').all()
-  const masked = keys.map(k => ({
-    id: k.id,
-    name: k.name,
-    masked_key: k.key_value.slice(0, 8) + '...' + k.key_value.slice(-4),
-  }))
-  res.json(masked)
-})
-
-app.post('/api/keys', (req, res) => {
-  const { name, key } = req.body
-  if (!name || !key) return res.status(400).json({ error: '名称和Key必填' })
-  const result = db.prepare('INSERT INTO api_keys (name, key_value) VALUES (?, ?)').run(name, key)
-  res.json({ id: result.lastInsertRowid })
-})
-
-app.delete('/api/keys/:id', (req, res) => {
-  db.prepare('DELETE FROM api_keys WHERE id = ?').run(req.params.id)
-  res.json({ ok: true })
-})
-
-// ─── Testing ───
-async function testSiteEndpoint(apiBase, model, apiKey) {
-  const startTime = Date.now()
-  const testPrompt = 'What is 2+2? Reply with just the number.'
-  
+// Probe 1: Self-identification — ask the model who it is
+async function probeSelfId(apiBase, apiKey, model) {
+  const start = Date.now()
   try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 30000)
-
-    const response = await fetch(`${apiBase}/chat/completions`, {
+    const res = await fetchWithTimeout(`${apiBase}/chat/completions`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
       body: JSON.stringify({
         model,
-        messages: [{ role: 'user', content: testPrompt }],
-        max_tokens: 50,
+        messages: [
+          { role: 'system', content: 'Answer honestly and directly.' },
+          { role: 'user', content: 'What AI model are you? Just tell me your model name and version, nothing else.' }
+        ],
+        max_tokens: 100,
         temperature: 0,
       }),
-      signal: controller.signal,
     })
-
-    clearTimeout(timeout)
-    const latencyMs = Date.now() - startTime
-    const statusCode = response.status
-
-    if (!response.ok) {
-      const errBody = await response.text().catch(() => '')
-      return {
-        latency_ms: latencyMs,
-        success: false,
-        status_code: statusCode,
-        tokens_per_second: 0,
-        is_watermarked: false,
-        error_message: `HTTP ${statusCode}: ${errBody.slice(0, 200)}`,
-      }
+    const latency = Date.now() - start
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '')
+      return { success: false, latency, error: `HTTP ${res.status}: ${errText.slice(0, 200)}` }
     }
-
-    const data = await response.json()
-    const content = data.choices?.[0]?.message?.content || ''
-    const usage = data.usage || {}
-    const completionTokens = usage.completion_tokens || content.length / 4
-    const tokensPerSecond = completionTokens / (latencyMs / 1000)
-    
-    // simple watermark detection: check if response model matches requested model
+    const data = await res.json()
+    const content = (data.choices?.[0]?.message?.content || '').trim()
     const responseModel = data.model || ''
-    const isWatermarked = responseModel && !responseModel.toLowerCase().includes(model.split('-')[0].toLowerCase())
-
-    return {
-      latency_ms: latencyMs,
-      success: true,
-      status_code: statusCode,
-      tokens_per_second: Math.round(tokensPerSecond * 10) / 10,
-      is_watermarked: isWatermarked,
-      error_message: null,
-    }
-  } catch (err) {
-    return {
-      latency_ms: Date.now() - startTime,
-      success: false,
-      status_code: 0,
-      tokens_per_second: 0,
-      is_watermarked: false,
-      error_message: err.message || 'Unknown error',
-    }
+    return { success: true, latency, content, responseModel, usage: data.usage }
+  } catch (e) {
+    return { success: false, latency: Date.now() - start, error: e.message }
   }
 }
 
-app.post('/api/test', async (req, res) => {
-  const { site_id, model, api_key } = req.body
-  if (!site_id || !model || !api_key) {
-    return res.status(400).json({ error: '站点、模型和API Key必填' })
+// Probe 2: Math reasoning — something cheap models often get wrong
+async function probeMathReasoning(apiBase, apiKey, model) {
+  const start = Date.now()
+  try {
+    const res = await fetchWithTimeout(`${apiBase}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model,
+        messages: [{
+          role: 'user',
+          content: 'A farmer has 17 sheep. All but 9 run away. How many sheep does the farmer have left? Answer with JUST the number, nothing else.'
+        }],
+        max_tokens: 10,
+        temperature: 0,
+      }),
+    })
+    const latency = Date.now() - start
+    if (!res.ok) return { success: false, latency, error: `HTTP ${res.status}` }
+    const data = await res.json()
+    const content = (data.choices?.[0]?.message?.content || '').trim()
+    const answer = parseInt(content)
+    return { success: true, latency, content, correct: answer === 9, responseModel: data.model, usage: data.usage }
+  } catch (e) {
+    return { success: false, latency: Date.now() - start, error: e.message }
+  }
+}
+
+// Probe 3: Logic puzzle — distinguishes high-end from cheap models
+async function probeLogicPuzzle(apiBase, apiKey, model) {
+  const start = Date.now()
+  try {
+    const res = await fetchWithTimeout(`${apiBase}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model,
+        messages: [{
+          role: 'user',
+          content: 'If it takes 5 machines 5 minutes to make 5 widgets, how long would it take 100 machines to make 100 widgets? Just answer the number of minutes.'
+        }],
+        max_tokens: 20,
+        temperature: 0,
+      }),
+    })
+    const latency = Date.now() - start
+    if (!res.ok) return { success: false, latency, error: `HTTP ${res.status}` }
+    const data = await res.json()
+    const content = (data.choices?.[0]?.message?.content || '').trim()
+    const answer = parseInt(content)
+    return { success: true, latency, content, correct: answer === 5, responseModel: data.model, usage: data.usage }
+  } catch (e) {
+    return { success: false, latency: Date.now() - start, error: e.message }
+  }
+}
+
+// Probe 4: Code generation quality — cheap models produce notably worse code
+async function probeCodeQuality(apiBase, apiKey, model) {
+  const start = Date.now()
+  try {
+    const res = await fetchWithTimeout(`${apiBase}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model,
+        messages: [{
+          role: 'user',
+          content: 'Write a Python function that checks if a number is prime. Use type hints. Just the function, no explanation.'
+        }],
+        max_tokens: 300,
+        temperature: 0,
+      }),
+    })
+    const latency = Date.now() - start
+    if (!res.ok) return { success: false, latency, error: `HTTP ${res.status}` }
+    const data = await res.json()
+    const content = (data.choices?.[0]?.message?.content || '').trim()
+    const hasTypeHints = content.includes('-> bool') || content.includes(': int')
+    const hasEdgeCases = content.includes('<= 1') || content.includes('< 2') || content.includes('== 1')
+    const hasSqrtOpt = content.includes('sqrt') || content.includes('** 0.5') || content.includes('isqrt')
+    const qualityScore = (hasTypeHints ? 30 : 0) + (hasEdgeCases ? 35 : 0) + (hasSqrtOpt ? 35 : 0)
+    const usage = data.usage
+    const completionTokens = usage?.completion_tokens || Math.ceil(content.length / 4)
+    const tps = completionTokens / (latency / 1000)
+
+    return { success: true, latency, content, qualityScore, hasTypeHints, hasEdgeCases, hasSqrtOpt, tps: Math.round(tps * 10) / 10, responseModel: data.model, usage }
+  } catch (e) {
+    return { success: false, latency: Date.now() - start, error: e.message }
+  }
+}
+
+// Probe 5: Chinese understanding — GLM/Qwen substitution detection
+async function probeChineseNuance(apiBase, apiKey, model) {
+  const start = Date.now()
+  try {
+    const res = await fetchWithTimeout(`${apiBase}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model,
+        messages: [{
+          role: 'user',
+          content: 'Translate to English precisely: "这个瓜保熟吗？" — This is Chinese internet slang. Explain the literal AND the slang meaning in one sentence.'
+        }],
+        max_tokens: 150,
+        temperature: 0,
+      }),
+    })
+    const latency = Date.now() - start
+    if (!res.ok) return { success: false, latency, error: `HTTP ${res.status}` }
+    const data = await res.json()
+    const content = (data.choices?.[0]?.message?.content || '').trim().toLowerCase()
+    const getsSlang = content.includes('reliable') || content.includes('trust') || content.includes('guarantee') || content.includes('legit') || content.includes('assured') || content.includes('ripe')
+    return { success: true, latency, content: data.choices?.[0]?.message?.content?.trim(), getsSlang, responseModel: data.model, usage: data.usage }
+  } catch (e) {
+    return { success: false, latency: Date.now() - start, error: e.message }
+  }
+}
+
+async function fetchWithTimeout(url, options, timeoutMs = 30000) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal })
+    return res
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+// ─── Main Detection Endpoint ───
+app.post('/api/detect', async (req, res) => {
+  const { api_base, api_key, model } = req.body
+  if (!api_base || !api_key || !model) {
+    return res.status(400).json({ error: '请填写完整：API 地址、Key 和模型名称' })
   }
 
-  const site = db.prepare('SELECT * FROM sites WHERE id = ?').get(site_id)
-  if (!site) return res.status(404).json({ error: '站点不存在' })
+  const base = api_base.replace(/\/+$/, '')
+  const family = getModelFamily(model)
+  const issues = []
+  const probeResults = {}
+  let totalLatency = 0
+  let successCount = 0
 
-  const result = await testSiteEndpoint(site.api_base, model, api_key)
-  
-  const insert = db.prepare(`
-    INSERT INTO test_results (site_id, model, latency_ms, success, status_code, tokens_per_second, is_watermarked, error_message)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `)
-  const dbResult = insert.run(
-    site_id, model, result.latency_ms, result.success ? 1 : 0,
-    result.status_code, result.tokens_per_second, result.is_watermarked ? 1 : 0,
-    result.error_message
-  )
+  // Run all probes
+  const [selfId, math, logic, code, chinese] = await Promise.all([
+    probeSelfId(base, api_key, model),
+    probeMathReasoning(base, api_key, model),
+    probeLogicPuzzle(base, api_key, model),
+    probeCodeQuality(base, api_key, model),
+    probeChineseNuance(base, api_key, model),
+  ])
 
-  const testRecord = db.prepare('SELECT * FROM test_results WHERE id = ?').get(dbResult.lastInsertRowid)
-  testRecord.site_name = site.name
-  testRecord.success = !!testRecord.success
-  testRecord.is_watermarked = !!testRecord.is_watermarked
-  res.json(testRecord)
-})
+  probeResults.selfId = selfId
+  probeResults.math = math
+  probeResults.logic = logic
+  probeResults.code = code
+  probeResults.chinese = chinese
 
-app.post('/api/test/batch', async (req, res) => {
-  const { model, api_key } = req.body
-  if (!model || !api_key) {
-    return res.status(400).json({ error: '模型和API Key必填' })
+  // ─── Analyze Results ───
+
+  // 1. Connection check
+  const allFailed = [selfId, math, logic, code, chinese].every(p => !p.success)
+  if (allFailed) {
+    return res.json({
+      status: 'error',
+      verdict: '连接失败',
+      verdictDetail: '无法连接到 API 端点，请检查地址和 Key 是否正确',
+      score: 0,
+      issues: [{ severity: 'critical', probe: '连接', message: selfId.error || '所有探针均失败' }],
+      probes: probeResults,
+    })
   }
 
-  const sites = db.prepare('SELECT * FROM sites').all()
-  if (!sites.length) return res.status(400).json({ error: '没有可测试的站点' })
+  // 2. Self-identification analysis
+  if (selfId.success) {
+    successCount++
+    totalLatency += selfId.latency
 
-  const results = []
-  const insert = db.prepare(`
-    INSERT INTO test_results (site_id, model, latency_ms, success, status_code, tokens_per_second, is_watermarked, error_message)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `)
+    // Check if response model header matches
+    if (selfId.responseModel) {
+      const respFamily = getModelFamily(selfId.responseModel)
+      if (family !== 'unknown' && respFamily !== 'unknown' && respFamily !== family) {
+        issues.push({
+          severity: 'critical',
+          probe: '模型标识',
+          message: `你请求的是 ${model}，但返回头显示实际模型是 "${selfId.responseModel}"`,
+        })
+      }
+    }
 
-  for (const site of sites) {
-    const result = await testSiteEndpoint(site.api_base, model, api_key)
-    const dbResult = insert.run(
-      site.id, model, result.latency_ms, result.success ? 1 : 0,
-      result.status_code, result.tokens_per_second, result.is_watermarked ? 1 : 0,
-      result.error_message
-    )
-    const testRecord = db.prepare('SELECT * FROM test_results WHERE id = ?').get(dbResult.lastInsertRowid)
-    testRecord.site_name = site.name
-    testRecord.success = !!testRecord.success
-    testRecord.is_watermarked = !!testRecord.is_watermarked
-    results.push(testRecord)
+    // Check self-reported identity
+    if (selfId.content && family !== 'unknown') {
+      const fp = MODEL_FINGERPRINTS[family]
+      if (fp) {
+        const contentLower = selfId.content.toLowerCase()
+        const claimsCorrectFamily = fp.knownSelfId.test(contentLower)
+        if (!claimsCorrectFamily) {
+          // Check if it claims to be a different known model
+          const claimsCheap = /glm|chatglm|qwen|通义|智谱|minimax|abab|baichuan|yi-|文心|ernie/i.test(contentLower)
+          if (claimsCheap) {
+            issues.push({
+              severity: 'critical',
+              probe: '自我识别',
+              message: `模型自称是 "${selfId.content}"，这不是你购买的 ${model}，疑似被替换为廉价国产模型`,
+            })
+          } else {
+            issues.push({
+              severity: 'warning',
+              probe: '自我识别',
+              message: `模型自称 "${selfId.content}"，与预期的 ${model} 不完全一致`,
+            })
+          }
+        }
+      }
+    }
   }
 
-  res.json(results)
-})
-
-// ─── Test History ───
-app.get('/api/tests', (req, res) => {
-  const { site_id } = req.query
-  let sql = `
-    SELECT t.*, s.name as site_name
-    FROM test_results t
-    LEFT JOIN sites s ON s.id = t.site_id
-  `
-  const params = []
-  if (site_id) {
-    sql += ' WHERE t.site_id = ?'
-    params.push(site_id)
+  // 3. Math reasoning
+  if (math.success) {
+    successCount++
+    totalLatency += math.latency
+    if (!math.correct) {
+      issues.push({
+        severity: 'warning',
+        probe: '数学推理',
+        message: `简单数学题答错（答了 "${math.content}"，正确答案是 9）。高端模型不应出错，疑似用了低质量模型`,
+      })
+    }
   }
-  sql += ' ORDER BY t.tested_at DESC LIMIT 200'
 
-  const rows = db.prepare(sql).all(...params)
-  rows.forEach(r => {
-    r.success = !!r.success
-    r.is_watermarked = !!r.is_watermarked
-  })
-  res.json(rows)
-})
-
-// ─── Rankings ───
-app.get('/api/rankings', (req, res) => {
-  const { model } = req.query
-  let sql = `
-    SELECT
-      t.site_id,
-      s.name as site_name,
-      s.url as site_url,
-      t.model,
-      ROUND(AVG(t.latency_ms), 1) as avg_latency,
-      ROUND(AVG(t.success) * 100, 1) as success_rate,
-      ROUND(AVG(t.tokens_per_second), 1) as avg_tps,
-      ROUND(AVG(t.is_watermarked) * 100, 1) as watermark_rate,
-      COUNT(*) as total_tests,
-      MAX(t.tested_at) as last_tested
-    FROM test_results t
-    LEFT JOIN sites s ON s.id = t.site_id
-  `
-  const params = []
-  if (model) {
-    sql += ' WHERE t.model = ?'
-    params.push(model)
+  // 4. Logic puzzle
+  if (logic.success) {
+    successCount++
+    totalLatency += logic.latency
+    if (!logic.correct) {
+      issues.push({
+        severity: 'warning',
+        probe: '逻辑推理',
+        message: `经典逻辑题答错（答了 "${logic.content}"，正确答案是 5 分钟）。高端模型通常能答对`,
+      })
+    }
   }
-  sql += ' GROUP BY t.site_id, t.model HAVING total_tests >= 1 ORDER BY avg_latency ASC'
 
-  const rows = db.prepare(sql).all(...params)
+  // 5. Code quality
+  if (code.success) {
+    successCount++
+    totalLatency += code.latency
+    if (code.qualityScore < 50) {
+      issues.push({
+        severity: 'warning',
+        probe: '代码质量',
+        message: `生成的代码质量偏低（得分 ${code.qualityScore}/100），缺少类型标注或边界处理，不像高端模型的产出`,
+      })
+    }
+  }
 
-  // compute score: weighted combination
-  const scored = rows.map(r => {
-    const latencyScore = Math.max(0, 100 - (r.avg_latency / 100))
-    const successScore = r.success_rate
-    const tpsScore = Math.min(100, r.avg_tps * 2)
-    const watermarkPenalty = r.watermark_rate * 0.5
-    const score = (latencyScore * 0.25 + successScore * 0.35 + tpsScore * 0.25) - watermarkPenalty
-    return { ...r, score: Math.max(0, Math.min(100, Math.round(score * 10) / 10)) }
-  })
-  scored.sort((a, b) => b.score - a.score)
+  // 6. Chinese nuance
+  if (chinese.success) {
+    successCount++
+    totalLatency += chinese.latency
+  }
 
-  res.json(scored)
-})
+  // 7. Response model consistency across probes
+  const responseModels = [selfId, math, logic, code, chinese]
+    .filter(p => p.success && p.responseModel)
+    .map(p => p.responseModel)
+  const uniqueModels = [...new Set(responseModels)]
+  if (uniqueModels.length > 1) {
+    issues.push({
+      severity: 'warning',
+      probe: '模型一致性',
+      message: `多次请求返回了不同的模型标识：${uniqueModels.join(', ')}，站点可能在混用模型`,
+    })
+  }
 
-// ─── Models ───
-app.get('/api/models', (_req, res) => {
-  const rows = db.prepare('SELECT DISTINCT model FROM test_results ORDER BY model').all()
-  res.json(rows.map(r => r.model))
-})
+  // ─── Compute Overall Score ───
+  const criticalCount = issues.filter(i => i.severity === 'critical').length
+  const warningCount = issues.filter(i => i.severity === 'warning').length
 
-// ─── Dashboard ───
-app.get('/api/dashboard', (_req, res) => {
-  const totalSites = db.prepare('SELECT COUNT(*) as cnt FROM sites').get().cnt
-  const totalTests = db.prepare('SELECT COUNT(*) as cnt FROM test_results').get().cnt
-  
-  const onlineSites = db.prepare(`
-    SELECT COUNT(DISTINCT site_id) as cnt FROM test_results
-    WHERE success = 1 AND tested_at > datetime('now', '-24 hours')
-  `).get().cnt
+  let score = 100
+  score -= criticalCount * 30
+  score -= warningCount * 10
+  if (code.success && code.qualityScore) score += (code.qualityScore - 50) * 0.1
+  score = Math.max(0, Math.min(100, Math.round(score)))
 
-  const avgLatency = db.prepare(`
-    SELECT AVG(latency_ms) as avg FROM test_results
-    WHERE success = 1 AND tested_at > datetime('now', '-24 hours')
-  `).get().avg || 0
+  let status, verdict, verdictDetail
+  if (criticalCount > 0) {
+    status = 'fail'
+    verdict = '高度疑似掺水'
+    verdictDetail = '检测到严重问题，该 API 端点很可能没有使用你购买的模型'
+  } else if (warningCount >= 2) {
+    status = 'suspect'
+    verdict = '存在可疑迹象'
+    verdictDetail = '多项检测出现异常，建议谨慎使用并进一步验证'
+  } else if (warningCount === 1) {
+    status = 'caution'
+    verdict = '轻微异常'
+    verdictDetail = '有一项检测不太正常，可能是模型版本差异导致，整体尚可'
+  } else {
+    status = 'pass'
+    verdict = '检测通过'
+    verdictDetail = '各项探针均未发现掺水迹象，该 API 看起来是正品'
+  }
 
-  const recentTests = db.prepare(`
-    SELECT t.*, s.name as site_name
-    FROM test_results t
-    LEFT JOIN sites s ON s.id = t.site_id
-    ORDER BY t.tested_at DESC LIMIT 20
-  `).all()
-  recentTests.forEach(r => {
-    r.success = !!r.success
-    r.is_watermarked = !!r.is_watermarked
-  })
-
-  // top rankings
-  const rankRows = db.prepare(`
-    SELECT
-      t.site_id,
-      s.name as site_name,
-      s.url as site_url,
-      t.model,
-      ROUND(AVG(t.latency_ms), 1) as avg_latency,
-      ROUND(AVG(t.success) * 100, 1) as success_rate,
-      ROUND(AVG(t.tokens_per_second), 1) as avg_tps,
-      ROUND(AVG(t.is_watermarked) * 100, 1) as watermark_rate,
-      COUNT(*) as total_tests,
-      MAX(t.tested_at) as last_tested
-    FROM test_results t
-    LEFT JOIN sites s ON s.id = t.site_id
-    GROUP BY t.site_id, t.model
-    HAVING total_tests >= 1
-  `).all()
-
-  const topRankings = rankRows.map(r => {
-    const latencyScore = Math.max(0, 100 - (r.avg_latency / 100))
-    const successScore = r.success_rate
-    const tpsScore = Math.min(100, r.avg_tps * 2)
-    const watermarkPenalty = r.watermark_rate * 0.5
-    const score = (latencyScore * 0.25 + successScore * 0.35 + tpsScore * 0.25) - watermarkPenalty
-    return { ...r, score: Math.max(0, Math.min(100, Math.round(score * 10) / 10)) }
-  }).sort((a, b) => b.score - a.score).slice(0, 10)
+  const avgLatency = successCount > 0 ? Math.round(totalLatency / successCount) : 0
 
   res.json({
-    total_sites: totalSites,
-    total_tests: totalTests,
-    online_sites: onlineSites,
-    avg_latency: Math.round(avgLatency),
-    recent_tests: recentTests,
-    top_rankings: topRankings,
+    status,
+    verdict,
+    verdictDetail,
+    score,
+    avgLatency,
+    issues,
+    probes: {
+      selfId: {
+        name: '模型自我识别',
+        success: selfId.success,
+        latency: selfId.latency,
+        detail: selfId.success ? selfId.content : selfId.error,
+        responseModel: selfId.responseModel,
+      },
+      math: {
+        name: '数学推理测试',
+        success: math.success,
+        latency: math.latency,
+        correct: math.correct,
+        detail: math.success ? `答案: ${math.content}（${math.correct ? '正确' : '错误，应为9'}）` : math.error,
+      },
+      logic: {
+        name: '逻辑推理测试',
+        success: logic.success,
+        latency: logic.latency,
+        correct: logic.correct,
+        detail: logic.success ? `答案: ${logic.content}（${logic.correct ? '正确' : '错误，应为5'}）` : logic.error,
+      },
+      code: {
+        name: '代码生成质量',
+        success: code.success,
+        latency: code.latency,
+        qualityScore: code.qualityScore,
+        tps: code.tps,
+        detail: code.success ? `质量 ${code.qualityScore}/100 | 速度 ${code.tps} t/s` : code.error,
+      },
+      chinese: {
+        name: '中文语境理解',
+        success: chinese.success,
+        latency: chinese.latency,
+        getsSlang: chinese.getsSlang,
+        detail: chinese.success ? (chinese.getsSlang ? '正确理解了俚语含义' : '未能理解俚语含义') : chinese.error,
+      },
+    },
+    meta: {
+      requestedModel: model,
+      modelFamily: family,
+      responseModels: uniqueModels,
+      testedAt: new Date().toISOString(),
+    },
   })
+})
+
+// ─── Quick connectivity test ───
+app.post('/api/ping', async (req, res) => {
+  const { api_base, api_key, model } = req.body
+  const base = (api_base || '').replace(/\/+$/, '')
+  const start = Date.now()
+  try {
+    const r = await fetchWithTimeout(`${base}/models`, {
+      headers: { 'Authorization': `Bearer ${api_key}` },
+    }, 10000)
+    res.json({ ok: r.ok, latency: Date.now() - start, status: r.status })
+  } catch (e) {
+    res.json({ ok: false, latency: Date.now() - start, error: e.message })
+  }
 })
 
 // ─── Static files (production) ───
 const distPath = join(__dirname, '..', 'dist')
 if (fs.existsSync(distPath)) {
   app.use(express.static(distPath))
-  app.get('*', (_req, res) => {
-    res.sendFile(join(distPath, 'index.html'))
-  })
+  app.get('*', (_req, res) => res.sendFile(join(distPath, 'index.html')))
 }
 
 const PORT = process.env.PORT || 3721
 app.listen(PORT, () => {
-  console.log(`API Relay Hub server running on http://localhost:${PORT}`)
+  console.log(`API Purity Detector running on http://localhost:${PORT}`)
 })

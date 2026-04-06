@@ -1,129 +1,109 @@
-# API Relay Hub
+# API 纯净度检测器
 
-> AI API 中转站自动化评测平台 —— 延迟测试、掺水检测、实时排行
+> 你买的 AI API 掺水了吗？一键检测，用数据说话。
 
-国内使用 Claude / GPT / Gemini 等 AI API 需要通过中转站，但中转站水很深——延迟高、模型掺水、稳定性差……
-**API Relay Hub** 帮你自动测试各中转站的接口质量，用数据说话。
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Node](https://img.shields.io/badge/node-%3E%3D18-green.svg)
 
-## 功能
+---
 
-- **仪表盘总览** — 站点数、测试次数、在线率、平均延迟一目了然
-- **排行榜** — 基于延迟、成功率、速度、掺水率的综合评分排名，支持按模型筛选
-- **一键测试** — 输入 API Key，单站或全站批量测试，实时出结果
-- **掺水检测** — 比对请求模型与响应模型，自动标记可疑掺水
-- **Key 管理** — 服务器本地加密存储，方便反复测试，不上传第三方
-- **站点管理** — 自由添加/删除中转站，预置主流站点
+## 这是什么？
 
-## 技术栈
+买了 Claude / GPT / Gemini 的 API 中转服务，不确定商家有没有拿廉价模型冒充高端模型？
 
-| 层级 | 技术 |
-|------|------|
-| 前端 | React 18 + TypeScript + Vite + Tailwind CSS |
-| 后端 | Node.js + Express |
-| 数据库 | SQLite (better-sqlite3) |
-| 动画 | Framer Motion |
-| 图表 | Recharts |
-| 图标 | Lucide React |
+**粘贴你的 API 地址和 Key，点一下，10 秒出结果。**
 
-## 快速开始
+检测器会自动向你的 API 发送 5 个精心设计的探针请求，从多个维度验证你拿到的到底是不是正品：
+
+| 探针 | 检测什么 | 原理 |
+|------|----------|------|
+| 🪪 **身份验证** | 模型是否是你买的那个 | 让模型自报身份，对比请求模型和返回头中的模型标识 |
+| 🧮 **数学推理** | 模型智力水平 | 简单但需要理解力的数学题，廉价模型容易答错 |
+| 🧩 **逻辑推理** | 是否是高端模型 | 经典思维陷阱题，区分高端和低端模型 |
+| 💻 **代码质量** | 生成水平是否达标 | 让模型写代码，评估类型标注、边界处理、算法优化 |
+| 🌏 **中文理解** | 是否用国产模型替换 | 测试对中文俚语/网络用语的理解深度 |
+
+## 检测结果
+
+- ✅ **检测通过** — 各项探针均未发现掺水迹象
+- ⚠️ **轻微异常** — 有一项不太正常，可能是版本差异
+- 🟠 **存在可疑迹象** — 多项异常，建议谨慎
+- 🔴 **高度疑似掺水** — 检测到严重问题，大概率被偷换模型
+
+## 快速使用
 
 ### 环境要求
 
 - Node.js >= 18
-- npm 或 pnpm
 
-### 安装
+### 三步启动
 
 ```bash
 git clone https://github.com/Forlives/relay-api-hub.git
 cd relay-api-hub
 npm install
-```
-
-### 开发模式
-
-同时启动前端开发服务器和后端 API 服务器：
-
-```bash
 npm run dev:all
 ```
 
-- 前端: http://localhost:5173
-- 后端: http://localhost:3721
+打开 http://localhost:5173 ，粘贴你的 API 信息，点击"开始检测"。
 
-### 生产部署
+### 生产部署（单命令）
 
 ```bash
-# 构建前端
-npm run build
-
-# 启动服务器（会同时托管静态文件）
-npm run server
+npm run build && npm run server
 ```
 
-访问 http://localhost:3721 即可。
+访问 http://localhost:3721
 
-## 项目结构
+## 隐私安全
+
+- **Key 不会被存储** — 仅在检测时实时使用，用完即丢
+- **不发送到第三方** — 所有请求直接从你的服务器发往中转站
+- **完全开源** — 代码就在这里，随时审查
+- **总消耗 < 500 token** — 5 个探针请求加起来花不了几分钱
+
+## 技术栈
+
+- **前端**: React + TypeScript + Vite + Tailwind CSS + Framer Motion
+- **后端**: Node.js + Express（无数据库，纯无状态）
+- **检测**: 5 个并行探针 + 模型指纹比对 + 综合评分算法
+
+## API
+
+只有两个接口，简单明了：
 
 ```
-relay-api-hub/
-├── src/                    # 前端源码
-│   ├── components/         # 通用组件
-│   ├── pages/              # 页面组件
-│   ├── lib/                # 工具函数 & API 客户端
-│   ├── App.tsx             # 路由配置
-│   ├── main.tsx            # 入口
-│   └── index.css           # 全局样式
-├── server/
-│   └── index.mjs           # Express 后端服务
-├── public/                 # 静态资源
-├── data/                   # SQLite 数据库（自动创建）
-├── package.json
-├── vite.config.ts
-├── tailwind.config.js
-└── tsconfig.json
+POST /api/detect    — 完整检测（5 个探针）
+POST /api/ping      — 快速连通性测试
 ```
 
-## API 接口
+### /api/detect 请求体
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/dashboard` | 获取仪表盘数据 |
-| GET | `/api/sites` | 获取所有站点 |
-| POST | `/api/sites` | 添加新站点 |
-| DELETE | `/api/sites/:id` | 删除站点 |
-| GET | `/api/rankings` | 获取排行榜（?model= 可选） |
-| GET | `/api/models` | 获取已测试过的模型列表 |
-| POST | `/api/test` | 单站测试 |
-| POST | `/api/test/batch` | 全站批量测试 |
-| GET | `/api/tests` | 获取测试历史 |
-| GET | `/api/keys` | 获取已保存的 Key（脱敏） |
-| POST | `/api/keys` | 保存 API Key |
-| DELETE | `/api/keys/:id` | 删除 API Key |
+```json
+{
+  "api_base": "https://api.example.com/v1",
+  "api_key": "sk-...",
+  "model": "claude-sonnet-4-6-20250514"
+}
+```
 
-## 预置站点
+### 返回结果
 
-项目预置了以下主流中转站（基于 [relayAPI](https://github.com/zzsting88/relayAPI) 推荐）：
+```json
+{
+  "status": "pass | caution | suspect | fail",
+  "verdict": "检测通过",
+  "score": 95,
+  "avgLatency": 1200,
+  "issues": [],
+  "probes": { ... }
+}
+```
 
-- PackyCode — 老牌站点，质量稳定
-- AI派 — 价格便宜，不注水
-- 云雾AI — 支持模型多，面向企业
-- RightCode — 编程专用，文档清晰
-- Chintao AI — 新站质量好
-- SparkCode — 多模型支持
-- BUZZ — 价格清晰
-- ZeroCode — VIP 分等级
+## 灵感来源
 
-## 安全说明
-
-- API Key 仅存储在本地 SQLite 数据库
-- 不会将 Key 上传到任何第三方服务
-- 建议在自己的服务器上部署，不要暴露到公网
-- 定期清理不再使用的 Key
-
-## 致谢
-
-灵感来源于 [zzsting88/relayAPI](https://github.com/zzsting88/relayAPI) 和 [hvoy.ai](https://hvoy.ai/)
+- [zzsting88/relayAPI](https://github.com/zzsting88/relayAPI) — AI API 中转站推荐与评测
+- [hvoy.ai](https://hvoy.ai/) — 中转站实时排行
 
 ## License
 
