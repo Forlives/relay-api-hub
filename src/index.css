@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --color-brand: #3b82f6;
+  }
+  body {
+    @apply antialiased;
+  }
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-gray-900;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gray-700 rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-gray-600;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-gray-900/60 backdrop-blur-xl border border-gray-800/50 rounded-2xl;
+  }
+  .glow-brand {
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.15), 0 0 60px rgba(59, 130, 246, 0.05);
+  }
+  .gradient-text {
+    @apply bg-gradient-to-r from-blue-400 via-cyan-400 to-emerald-400 bg-clip-text text-transparent;
+  }
+  .status-dot {
+    @apply w-2 h-2 rounded-full;
+  }
+  .status-dot-online {
+    @apply bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.6)];
+  }
+  .status-dot-offline {
+    @apply bg-red-400 shadow-[0_0_6px_rgba(248,113,113,0.6)];
+  }
+  .status-dot-degraded {
+    @apply bg-yellow-400 shadow-[0_0_6px_rgba(250,204,21,0.6)];
+  }
+}

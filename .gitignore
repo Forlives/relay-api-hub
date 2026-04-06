@@ -1,0 +1,15 @@
+node_modules
+dist
+.env
+*.local
+data/
+*.db
+.DS_Store
+*.log
+.cursor
+.specstory
+.vscode
+agent-tools
+agent-transcripts
+mcps
+terminals
