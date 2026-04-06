@@ -43,12 +43,11 @@ interface DetectionResult {
 }
 
 const PRESETS = [
-  { label: 'Claude 3.5 Sonnet', value: 'claude-3-5-sonnet-20240620' },
-  { label: 'Claude 3 Opus', value: 'claude-3-opus-20240229' },
-  { label: 'GPT-4o', value: 'gpt-4o' },
-  { label: 'GPT-4 Turbo', value: 'gpt-4-turbo' },
-  { label: 'Gemini 1.5 Pro', value: 'gemini-1.5-pro' },
-  { label: 'DeepSeek R1', value: 'deepseek-reasoner' },
+  { label: 'Claude 4.6 Sonnet', value: 'claude-sonnet-4-6-20250514' },
+  { label: 'Claude 4.6 Opus', value: 'claude-opus-4-6-20250514' },
+  { label: 'GPT-5.4', value: 'gpt-5.4' },
+  { label: 'Gemini 3.1 Pro', value: 'gemini-3.1-pro' },
+  { label: 'DeepSeek R1', value: 'deepseek-r1' },
 ]
 
 const statusConfig = {
