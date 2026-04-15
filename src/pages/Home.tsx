@@ -106,14 +106,26 @@ export default function Home() {
     setProgress('正在建立安全连接...')
 
     try {
-      setProgress('Ping 连通性...')
+      setProgress('正在检测 API 连通性...')
       const pingRes = await fetch('/api/ping', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ api_base: apiBase, api_key: apiKey, model: effectiveModel }),
       })
       const ping = await pingRes.json()
-      setProgress(ping.ok ? `连通 (${ping.latency}ms) — 正在运行 6 维度深度指纹分析...` : '运行 6 维度深度指纹分析 (约 15-40s)...')
+
+      if (!ping.ok) {
+        setResult({
+          status: 'error',
+          verdict: 'API 连接失败',
+          verdictDetail: `无法连接到 ${apiBase}${ping.error ? ` (${ping.error})` : ping.status ? ` (HTTP ${ping.status})` : ''}。请检查：1) API 地址是否正确 2) 服务器是否在线 3) API Key 是否有效`,
+          score: 0, avgLatency: 0, dimensions: [],
+          meta: { requestedModel: effectiveModel, modelFamily: '', baselineLabel: '', testedAt: new Date().toISOString() },
+        })
+        return
+      }
+
+      setProgress(`连通 (${ping.latency}ms) — 正在运行 6 维度深度指纹分析...`)
 
       const res = await fetch('/api/detect', {
         method: 'POST',
@@ -124,7 +136,7 @@ export default function Home() {
       if (res.ok) {
         setResult(data)
       } else {
-        setResult({ status: 'error', verdict: '检测失败', verdictDetail: data.error || '未知错误', score: 0, avgLatency: 0, dimensions: [], meta: { requestedModel: effectiveModel, modelFamily: '', baselineLabel: '', testedAt: new Date().toISOString() } })
+        setResult({ status: 'error', verdict: data.error?.includes('无法连接') ? 'API 连接失败' : '检测失败', verdictDetail: `${data.error || '未知错误'}${data.hint ? '\n' + data.hint : ''}`, score: 0, avgLatency: 0, dimensions: [], meta: { requestedModel: effectiveModel, modelFamily: '', baselineLabel: '', testedAt: new Date().toISOString() } })
       }
     } catch (e: any) {
       setResult({ status: 'error', verdict: '网络错误', verdictDetail: e.message, score: 0, avgLatency: 0, dimensions: [], meta: { requestedModel: effectiveModel, modelFamily: '', baselineLabel: '', testedAt: new Date().toISOString() } })

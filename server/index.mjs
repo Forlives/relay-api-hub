@@ -467,6 +467,17 @@ app.post('/api/detect', async (req, res) => {
   const family = getModelFamily(model)
   const baseline = BASELINES[family] || null
 
+  try {
+    const pingRes = await fetchWithTimeout(`${base}/models`, {
+      headers: { 'Authorization': `Bearer ${api_key}` },
+    }, 15000)
+  } catch (e) {
+    return res.status(502).json({
+      error: `无法连接到 API 服务器: ${e.message}`,
+      hint: '请检查 API 地址是否正确、服务器是否在线、网络是否通畅',
+    })
+  }
+
   const [sseResult, identityResult, cutoffResult, reasoningResult, codeResult, consistencyResult] = await Promise.all([
     probeSSEProtocol(base, api_key, model, family),
     probeIdentity(base, api_key, model, family),
