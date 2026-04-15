@@ -10,6 +10,10 @@
 
 🌐 **[https://detect.713812.xyz](https://detect.713812.xyz)** — 无需部署，直接使用
 
+<p align="center">
+  <img src="docs/preview.png" width="600" alt="界面预览" />
+</p>
+
 ## 工作原理
 
 与传统的「问几道题」式检测不同，本工具采用 **协议级指纹分析**，将被测 API 与**真实官方 API 的已知行为基线**做 1:1 对比。
