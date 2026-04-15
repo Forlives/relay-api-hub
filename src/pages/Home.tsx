@@ -5,7 +5,7 @@ import {
   Play, RotateCcw, ChevronDown, ChevronUp,
   Zap, Brain, Code2, Fingerprint, Calendar,
   CheckCircle, XCircle, Info, Sparkles, Activity,
-  UserCheck, Repeat, ArrowRight
+  UserCheck, Repeat, ArrowRight, Search, Loader2
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -73,8 +73,30 @@ export default function Home() {
   const [progress, setProgress] = useState('')
   const [result, setResult] = useState<DetectionResult | null>(null)
   const [expandedDim, setExpandedDim] = useState<string | null>(null)
+  const [fetchingModels, setFetchingModels] = useState(false)
+  const [remoteModels, setRemoteModels] = useState<{ id: string; owned_by?: string }[]>([])
+  const [showRemoteModels, setShowRemoteModels] = useState(false)
 
   const effectiveModel = customModel.trim() || model
+
+  const handleFetchModels = async () => {
+    if (!apiBase.trim() || !apiKey.trim()) return
+    setFetchingModels(true)
+    setRemoteModels([])
+    try {
+      const res = await fetch('/api/models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_base: apiBase, api_key: apiKey }),
+      })
+      const data = await res.json()
+      if (res.ok && data.models) {
+        setRemoteModels(data.models)
+        setShowRemoteModels(true)
+      }
+    } catch {}
+    setFetchingModels(false)
+  }
 
   const handleDetect = async () => {
     if (!apiBase.trim() || !apiKey.trim()) return
@@ -162,17 +184,68 @@ export default function Home() {
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-slate-700 mb-2 ml-1">API Key</label>
-                    <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="sk-..." disabled={testing} className="glass-input w-full font-mono text-sm tracking-widest" />
+                    <div className="flex gap-2">
+                      <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="sk-..." disabled={testing} className="glass-input flex-1 font-mono text-sm tracking-widest" />
+                      <button
+                        onClick={handleFetchModels}
+                        disabled={testing || fetchingModels || !apiBase.trim() || !apiKey.trim()}
+                        className={cn(
+                          'flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-300 border shadow-sm whitespace-nowrap',
+                          fetchingModels ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-white text-slate-600 border-slate-200 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200',
+                          (testing || !apiBase.trim() || !apiKey.trim()) && 'opacity-50 cursor-not-allowed'
+                        )}
+                      >
+                        {fetchingModels ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+                        {fetchingModels ? '查询中' : '查询模型'}
+                      </button>
+                    </div>
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-slate-700 mb-3 ml-1">你购买的模型</label>
                     <div className="flex flex-wrap gap-2.5 mb-3">
                       {PRESETS.map(p => (
-                        <button key={p.value} onClick={() => { setModel(p.value); setCustomModel('') }} disabled={testing} className={cn('px-4 py-2 rounded-xl text-xs font-semibold transition-all duration-300 border shadow-sm', model === p.value && !customModel ? 'bg-blue-50 text-blue-700 border-blue-200 ring-2 ring-blue-500/20' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50 hover:text-slate-800')}>
+                        <button key={p.value} onClick={() => { setModel(p.value); setCustomModel(''); setShowRemoteModels(false) }} disabled={testing} className={cn('px-4 py-2 rounded-xl text-xs font-semibold transition-all duration-300 border shadow-sm', model === p.value && !customModel ? 'bg-blue-50 text-blue-700 border-blue-200 ring-2 ring-blue-500/20' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50 hover:text-slate-800')}>
                           {p.label}
                         </button>
                       ))}
                     </div>
+
+                    <AnimatePresence>
+                      {showRemoteModels && remoteModels.length > 0 && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="mb-3 overflow-hidden"
+                        >
+                          <div className="p-3 rounded-xl bg-gradient-to-r from-blue-50/80 to-indigo-50/80 border border-blue-100">
+                            <div className="flex items-center justify-between mb-2.5">
+                              <span className="text-xs font-bold text-blue-700">
+                                该 Key 下可用模型 ({remoteModels.length})
+                              </span>
+                              <button onClick={() => setShowRemoteModels(false)} className="text-[10px] text-slate-400 hover:text-slate-600">收起</button>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto">
+                              {remoteModels.map(m => (
+                                <button
+                                  key={m.id}
+                                  onClick={() => { setCustomModel(m.id); setShowRemoteModels(false) }}
+                                  className={cn(
+                                    'px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all duration-200 border',
+                                    customModel === m.id
+                                      ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                                      : 'bg-white text-slate-600 border-slate-200 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200'
+                                  )}
+                                >
+                                  {m.id}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
                     <input value={customModel} onChange={e => setCustomModel(e.target.value)} placeholder="或输入自定义模型名" disabled={testing} className="glass-input w-full text-sm" />
                   </div>
                 </div>

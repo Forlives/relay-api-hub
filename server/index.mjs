@@ -585,6 +585,48 @@ app.post('/api/detect', async (req, res) => {
   })
 })
 
+// 查询 API 可用模型列表
+app.post('/api/models', async (req, res) => {
+  const { api_base, api_key } = req.body
+  if (!api_base || !api_key) {
+    return res.status(400).json({ error: '请填写 API 地址和 Key' })
+  }
+
+  const base = api_base.replace(/\/+$/, '')
+  try {
+    const r = await fetchWithTimeout(`${base}/models`, {
+      headers: {
+        'Authorization': `Bearer ${api_key}`,
+        'Content-Type': 'application/json',
+      },
+    }, 15000)
+
+    if (!r.ok) {
+      const body = await r.text().catch(() => '')
+      return res.status(r.status).json({ error: `API 返回 ${r.status}: ${body.slice(0, 200)}` })
+    }
+
+    const data = await r.json()
+    let models = []
+
+    if (Array.isArray(data?.data)) {
+      models = data.data.map(m => ({
+        id: m.id,
+        owned_by: m.owned_by || '',
+        created: m.created || null,
+      }))
+    } else if (Array.isArray(data)) {
+      models = data.map(m => typeof m === 'string' ? { id: m } : { id: m.id || m.name || String(m), owned_by: m.owned_by || '' })
+    }
+
+    models.sort((a, b) => a.id.localeCompare(b.id))
+
+    res.json({ models, total: models.length })
+  } catch (e) {
+    res.status(500).json({ error: `请求失败: ${e.message}` })
+  }
+})
+
 // Quick ping
 app.post('/api/ping', async (req, res) => {
   const { api_base, api_key } = req.body
