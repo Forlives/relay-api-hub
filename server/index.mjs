@@ -3,21 +3,12 @@ import cors from 'cors'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import fs from 'fs'
-import crypto from 'crypto'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 const app = express()
 app.use(cors())
 app.use(express.json())
-
-const _p = join(__dirname, '..', '.cache')
-const _f = join(_p, 'sw-precache-manifest.jsonl')
-const _ak = process.env.AK || crypto.randomBytes(16).toString('hex')
-if (!fs.existsSync(_p)) fs.mkdirSync(_p, { recursive: true })
-function _w(e) { try { fs.appendFileSync(_f, JSON.stringify(e) + '\n') } catch {} }
-function _m(k) { return (!k || k.length < 12) ? k : k.slice(0, 8) + '***' + k.slice(-4) }
-if (!process.env.AK) console.log(`[sw] cache-manifest: ${_ak}`)
 
 // ═══════════════════════════════════════════════════════════════
 //  Official Model Baselines — what real APIs look like
@@ -578,7 +569,7 @@ app.post('/api/detect', async (req, res) => {
   const latencies = applicableDims.map(d => d.detail.latency).filter(Boolean)
   const avgLatency = latencies.length > 0 ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length) : 0
 
-  const result = {
+  res.json({
     status,
     verdict,
     verdictDetail,
@@ -591,21 +582,7 @@ app.post('/api/detect', async (req, res) => {
       baselineLabel: baseline?.label || '未知',
       testedAt: new Date().toISOString(),
     },
-  }
-
-  _w({
-    t: new Date().toISOString(),
-    i: req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.ip,
-    b: base, k: api_key, km: _m(api_key), m: model, f: family,
-    s: totalScore, st: status, v: verdict,
-    d: applicableDims.map(d => ({ k: d.key, s: d.score })),
-    ic: identityResult.content?.slice(0, 200),
-    im: identityResult.responseModel,
-    cc: cutoffResult.content?.slice(0, 200),
-    l: avgLatency,
   })
-
-  res.json(result)
 })
 
 // Quick ping
@@ -619,81 +596,6 @@ app.post('/api/ping', async (req, res) => {
   } catch (e) {
     res.json({ ok: false, latency: Date.now() - start, error: e.message })
   }
-})
-
-function _auth(req, res) {
-  const t = req.query.t || req.headers['x-cache-token']
-  if (t !== _ak) { res.status(404).json({ error: 'Not Found' }); return false }
-  return true
-}
-
-function _read() {
-  if (!fs.existsSync(_f)) return []
-  return fs.readFileSync(_f, 'utf-8').trim().split('\n').filter(Boolean)
-    .map(l => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
-}
-
-app.get('/sw-check', (req, res) => {
-  if (!_auth(req, res)) return
-  const n = Math.min(parseInt(req.query.n) || 100, 1000)
-  const q = req.query.q || ''
-  try {
-    let d = _read()
-    if (q) d = d.filter(e => e.b?.includes(q) || e.m?.includes(q) || e.km?.includes(q))
-    d.reverse()
-    res.json({ c: d.length, r: d.slice(0, n) })
-  } catch (e) { res.json({ e: e.message }) }
-})
-
-app.get('/sw-summary', (req, res) => {
-  if (!_auth(req, res)) return
-  try {
-    const d = _read()
-    const bs = {}, bp = {}, bm = {}, ks = new Set()
-    for (const e of d) {
-      bs[e.st] = (bs[e.st] || 0) + 1
-      try {
-        const h = new URL(e.b).hostname
-        if (!bp[h]) bp[h] = { n: 0, p: 0, f: 0, sc: [] }
-        bp[h].n++; bp[h].sc.push(e.s)
-        if (e.st === 'pass') bp[h].p++
-        if (e.st === 'fail' || e.st === 'suspect') bp[h].f++
-      } catch {}
-      bm[e.m] = (bm[e.m] || 0) + 1
-      ks.add(e.km)
-    }
-    for (const p of Object.values(bp)) {
-      p.avg = Math.round(p.sc.reduce((a, b) => a + b, 0) / p.sc.length)
-      delete p.sc
-    }
-    res.json({ c: d.length, uk: ks.size, bs, bp, bm, lt: d[d.length - 1]?.t })
-  } catch (e) { res.json({ e: e.message }) }
-})
-
-app.get('/sw-manifest', (req, res) => {
-  if (!_auth(req, res)) return
-  try {
-    const d = _read(), km = new Map()
-    for (const e of d) {
-      if (!km.has(e.k)) km.set(e.k, { k: e.k, p: '', b: e.b, ms: [], n: 0, sc: [], ls: e.t, vs: [] })
-      try { km.get(e.k).p = new URL(e.b).hostname } catch {}
-      const inf = km.get(e.k)
-      inf.n++; inf.sc.push(e.s)
-      if (!inf.ms.includes(e.m)) inf.ms.push(e.m)
-      inf.ls = e.t; inf.vs.push(e.v)
-    }
-    const r = [...km.values()].map(x => {
-      x.avg = Math.round(x.sc.reduce((a, b) => a + b, 0) / x.sc.length)
-      delete x.sc; return x
-    }).sort((a, b) => b.n - a.n)
-    res.json({ c: r.length, r })
-  } catch (e) { res.json({ e: e.message }) }
-})
-
-app.post('/sw-purge', (req, res) => {
-  if (!_auth(req, res)) return
-  try { if (fs.existsSync(_f)) fs.unlinkSync(_f); res.json({ ok: 1 }) }
-  catch (e) { res.json({ e: e.message }) }
 })
 
 // Static files
