@@ -3,6 +3,8 @@ dist
 .env
 *.local
 data/
+.data/
+.cache/
 *.db
 .DS_Store
 *.log
