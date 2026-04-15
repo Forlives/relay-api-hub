@@ -18,6 +18,24 @@
 
 与传统的「问几道题」式检测不同，本工具采用 **协议级指纹分析**，将被测 API 与**真实官方 API 的已知行为基线**做 1:1 对比。
 
+检测算法参考了 [BridgeBench](https://www.bridgebench.ai/) 的多维度评测方法论：通过推理准确率、代码生成质量、响应一致性等维度建立可量化的模型能力指纹，据此判断 API 服务是否存在模型替换。
+
+### 基线数据来源
+
+我们的检测基线参考了 BridgeBench 2026 年 4 月的公开评测数据：
+
+| 模型 | 推理 | 代码算法 | 调试 | 安全 | 速度 (tok/s) |
+|------|------|---------|------|------|-------------|
+| Claude Sonnet 4.6 | 37.2 | — | 86.6 | 85.3 | 95.3 |
+| Claude Opus 4.6 | 39.6 | — | 87.0 | 81.6 | 92.2 |
+| GPT-5.4 | 40.6 | 98.9 | 85.6 | 84.4 | — |
+| Gemini 3.1 Pro | 34.3 | — | 85.9 | 85.2 | 122.2 |
+| Grok 4.20 Reasoning | 41.8 | — | 85.3 | 78.9 | 237.7 |
+
+> 数据来源：[BridgeBench AI Coding Benchmark](https://www.bridgebench.ai/) · 2026-04-14
+
+每个模型在各维度都有独特的能力指纹。例如 Claude Sonnet 4.6 的推理分 37.2 和调试分 86.6 构成了其特征签名，如果中转站用 GLM 或 Qwen 冒充，这些维度的偏差会立即暴露。
+
 ### 6 大检测维度
 
 | 维度 | 满分 | 检测内容 | 为什么有效 |
@@ -25,9 +43,9 @@
 | **SSE 协议指纹** | 100 | 流式响应的 SSE 事件链结构 | 官方 Anthropic 有独特的 `message_start → content_block_start → content_block_delta → message_delta → message_stop` 完整事件链，掺水站很难完美伪造 |
 | **模型身份验证** | 100 | 返回头 model 字段 + 自我声明 | 官方 API 会在 HTTP 返回头中标识正确模型名，且模型能正确自我介绍身份 |
 | **知识截止验证** | 100 | 训练数据截止时间 | 每个模型版本有固定的知识截止日期（如 Claude 4.6 = 2025 年 5 月），替换模型会暴露不同日期 |
-| **推理能力基线** | 100 | 数学陷阱 + 逻辑推理 | 高端模型（Claude 4.6/GPT-5.4）的基础推理正确率 100%，低端替代模型做不到 |
-| **代码生成质量** | 100 | 类型标注/边界处理/算法优化 | 官方高端模型的代码质量有已知特征（类型标注、sqrt 优化等），廉价模型缺少这些 |
-| **响应一致性** | 100 | 多次请求的模型标识和延迟 | 正规 API 多次请求的 model 字段完全一致，延迟波动在合理范围内 |
+| **推理能力基线** | 100 | 数学陷阱 + 逻辑推理 | 参考 BridgeBench Reasoning 基线，高端模型（Claude 4.6/GPT-5.4）的基础推理正确率 100%，低端替代模型做不到 |
+| **代码生成质量** | 100 | 类型标注/边界处理/算法优化 | 参考 BridgeBench Algorithms & Generation 基线，官方高端模型的代码质量有已知特征 |
+| **响应一致性** | 100 | 多次请求的模型标识和延迟 | 参考 BridgeBench Speed 基线，正规 API 的延迟和吞吐量应在已知范围内 |
 
 ### 综合评定
 
@@ -83,6 +101,12 @@ POST /api/detect
 ```
 
 返回 6 维度的详细分数、官方基线对比和综合评定结果。
+
+## 参考
+
+- [BridgeBench — AI Coding & Vibe Coding Benchmark](https://www.bridgebench.ai/) — 多维度 AI 模型能力评测基准
+- [Anthropic API Reference](https://docs.anthropic.com/) — Claude SSE 流式协议规范
+- [OpenAI API Reference](https://platform.openai.com/docs/) — GPT 系列 API 行为基线
 
 ## License
 
