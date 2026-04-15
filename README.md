@@ -6,6 +6,10 @@
   <img src="public/favicon.svg" width="64" alt="icon" />
 </p>
 
+## 在线体验
+
+🌐 **[https://detect.713812.xyz](https://detect.713812.xyz)** — 无需部署，直接使用
+
 ## 工作原理
 
 与传统的「问几道题」式检测不同，本工具采用 **协议级指纹分析**，将被测 API 与**真实官方 API 的已知行为基线**做 1:1 对比。
@@ -32,8 +36,8 @@
 
 ```bash
 # 克隆并安装
-git clone https://github.com/percyyuan/pian_key.git
-cd pian_key
+git clone https://github.com/Forlives/relay-api-hub.git
+cd relay-api-hub
 npm install
 
 # 启动（前后端同时）
@@ -45,8 +49,9 @@ npm run dev
 ## 隐私安全
 
 - API Key **不会被存储**，仅在检测过程中临时使用
-- 后端完全 **无状态**，不使用任何数据库
+- 后端完全 **无状态**，不记录任何日志
 - 所有检测请求都在你的 **本地服务器** 发出
+- 在线版同样遵守以上原则
 
 ## 技术栈
 
